@@ -15,7 +15,6 @@ import org.springframework.web.multipart.MultipartFile;
 import com.example.demo.model.Operacion;
 import com.example.demo.services.ArchivoService;
 import com.example.demo.util.ErrorResponse;
-import com.example.demo.util.SuccessResponse;
 
 @RestController
 @RequestMapping("/api/archivos")
@@ -25,17 +24,37 @@ public class ArchivoController {
     private ArchivoService archivoService;
 
     @PostMapping("/cargar")
-    public ResponseEntity<?> cargar(@RequestParam("file") MultipartFile file) {
+    public ResponseEntity<?> cargarArchivo(@RequestParam("file") MultipartFile file) {
         try {
-            String nombre = archivoService.guardarArchivo(file);
-            return ResponseEntity.ok(new SuccessResponse("Archivo cargado exitosamente", nombre));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage(), "Verifica el archivo"));
+            if (file.isEmpty()) {
+                return ResponseEntity.badRequest().body(new ErrorResponse("El archivo está vacío."));
+            }
+
+            if (!file.getOriginalFilename().endsWith(".csv")) {
+                return ResponseEntity.badRequest().body(new ErrorResponse("Formato de archivo no válido. Solo se permiten archivos .csv"));
+            }
+
+            String nombreArchivo = archivoService.guardarArchivo(file);
+            ArchivoCargadoDTO dto = new ArchivoCargadoDTO();
+            dto.setNombre(nombreArchivo);
+            dto.setMensaje("Archivo cargado exitosamente");
+
+            return ResponseEntity.ok(dto);
+
+        } catch (IOException e) {
+            return ResponseEntity.status(500).body(new ErrorResponse("Error al guardar el archivo: " + e.getMessage()));
         }
     }
 
     @PostMapping("/procesar/{nombre}")
-    public ResponseEntity<List<Operacion>> procesar(@PathVariable String nombre) throws IOException {
-        return ResponseEntity.ok(archivoService.procesarArchivo(nombre));
+    public ResponseEntity<?> procesar(@PathVariable String nombre) {
+        try {
+            List<Operacion> ops = archivoService.procesarArchivo(nombre);
+            return ResponseEntity.ok(ops);
+        } catch (IOException e) {
+            return ResponseEntity.status(500).body(new ErrorResponse("Error al leer el archivo: " + e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
+        }
     }
 }

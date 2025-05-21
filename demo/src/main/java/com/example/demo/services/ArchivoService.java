@@ -32,46 +32,78 @@ public class ArchivoService {
     }
 
     public String guardarArchivo(MultipartFile file) throws IOException {
-        String nombre = UUID.randomUUID().toString() + ".csv";
-        Path destino = rutaArchivos.resolve(nombre);
-        Files.copy(file.getInputStream(), destino);
-        return nombre;
+    // Validación adicional por seguridad
+    String originalFilename = file.getOriginalFilename();
+    if (originalFilename == null || !originalFilename.endsWith(".csv")) {
+        throw new IOException("Extensión de archivo no válida.");
     }
 
-    public List<Operacion> procesarArchivo(String nombreArchivo) throws IOException {
-        List<Operacion> operaciones = leerCSV(nombreArchivo);
+    String nombre = UUID.randomUUID().toString() + ".csv";
+    Path destino = rutaArchivos.resolve(nombre);
+    Files.copy(file.getInputStream(), destino);
+    return nombre;
+}
 
-        Path dirImagenes = rutaImagenes.resolve(nombreArchivo);
-        Files.createDirectories(dirImagenes);
+public List<Operacion> procesarArchivo(String nombreArchivo) throws IOException {
+    Path path = rutaArchivos.resolve(nombreArchivo);
 
-        operacionService.procesarOperaciones(nombreArchivo, operaciones, dirImagenes);
-        return operaciones;
+    if (!Files.exists(path)) {
+        throw new IllegalArgumentException("El archivo no existe: " + nombreArchivo);
     }
 
-    public List<Operacion> leerCSV(String nombreArchivo) throws IOException {
-        Path path = rutaArchivos.resolve(nombreArchivo);
-        List<Operacion> ops = new ArrayList<>();
+    List<Operacion> operaciones = leerCSV(nombreArchivo);
 
-        try (Reader reader = Files.newBufferedReader(path)) {
-            CSVParser parser = new CSVParser(reader,
-                CSVFormat.DEFAULT.builder()
-                    .setHeader("estructura", "operacion", "valor")
-                    .setSkipHeaderRecord(true)
-                    .build());
+    if (operaciones.isEmpty()) {
+        throw new IllegalArgumentException("El archivo está vacío o no tiene registros válidos.");
+    }
 
-            for (CSVRecord record : parser) {
-                Operacion op = new Operacion();
-                op.setEstructura(record.get("estructura"));
-                op.setTipoOperacion(record.get("operacion"));
+    Path dirImagenes = rutaImagenes.resolve(nombreArchivo);
+    Files.createDirectories(dirImagenes);
 
-                if (record.isSet("valor") && !record.get("valor").isEmpty()) {
-                    op.setValor(Integer.parseInt(record.get("valor")));
+    operacionService.procesarOperaciones(nombreArchivo, operaciones, dirImagenes);
+    return operaciones;
+}
+
+public List<Operacion> leerCSV(String nombreArchivo) throws IOException {
+    Path path = rutaArchivos.resolve(nombreArchivo);
+
+    List<Operacion> ops = new ArrayList<>();
+
+    try (Reader reader = Files.newBufferedReader(path)) {
+        CSVParser parser = new CSVParser(reader,
+            CSVFormat.DEFAULT.builder()
+                .setHeader("estructura", "operacion", "valor")
+                .setSkipHeaderRecord(true)
+                .build());
+
+        boolean headerValidated = false;
+        for (CSVRecord record : parser) {
+            if (!headerValidated) {
+                // Verificar encabezados
+                if (!record.isConsistent()
+                    || !record.isMapped("estructura")
+                    || !record.isMapped("operacion")) {
+                    throw new IllegalArgumentException("Formato del CSV no válido. Faltan columnas obligatorias.");
                 }
-
-                ops.add(op);
+                headerValidated = true;
             }
-        }
 
-        return ops;
+            Operacion op = new Operacion();
+            op.setEstructura(record.get("estructura"));
+            op.setTipoOperacion(record.get("operacion"));
+
+            if (record.isSet("valor") && !record.get("valor").isEmpty()) {
+                try {
+                    op.setValor(Integer.parseInt(record.get("valor")));
+                } catch (NumberFormatException e) {
+                    throw new IllegalArgumentException("Campo 'valor' contiene un valor no numérico.");
+                }
+            }
+
+            ops.add(op);
+        }
     }
+
+    return ops;
+}
 }
